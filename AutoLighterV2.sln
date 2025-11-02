@@ -1,0 +1,16 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoLighterV2", "AutoLighterV2\AutoLighterV2.csproj", "{D33114D9-78F2-4D80-B2CF-5D03C9150EFC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D33114D9-78F2-4D80-B2CF-5D03C9150EFC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D33114D9-78F2-4D80-B2CF-5D03C9150EFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D33114D9-78F2-4D80-B2CF-5D03C9150EFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D33114D9-78F2-4D80-B2CF-5D03C9150EFC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

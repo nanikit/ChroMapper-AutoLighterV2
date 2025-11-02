@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <!-- Default ChroMapper installation path - override in Directory.Build.props.user -->
+    <ChroMapperPath Condition="'$(ChroMapperPath)' == ''">$(USERPROFILE)\Documents\chromapper</ChroMapperPath>
+  </PropertyGroup>
+</Project>
