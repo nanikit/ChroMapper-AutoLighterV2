@@ -22,7 +22,7 @@ namespace AutoLighterV2
         private static string GetVersion()
         {
             var version = Assembly.GetExecutingAssembly().GetName().Version;
-            return version?.ToString() ?? "2.0.0.0";
+            return version?.ToString() ?? "2.1.0.0";
         }
 
         [Init]

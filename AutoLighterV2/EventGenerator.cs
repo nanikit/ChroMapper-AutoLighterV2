@@ -15,6 +15,7 @@ namespace AutoLighterV2
 
         private sealed class QBBrightness
         {
+            // first note offset
             public int StartQB { get; }
             public List<float> Values { get; }
 
@@ -25,8 +26,10 @@ namespace AutoLighterV2
             }
         }
 
-        private static QBBrightness BuildQuarterBeatBrightness(MapEditorState state, AutoLightV2Config cfg)
+        private static QBBrightness BuildQuarterBeatBrightness(MapEditorState state)
         {
+            if (state?.Notes == null) return null;
+
             var noteBeats = state.Notes.Where(n => n.Type != 3).OrderBy(n => n.JsonTime).Select(n => n.JsonTime).ToList();
             if (noteBeats.Count == 0) return null;
             float first = noteBeats.First();
@@ -38,7 +41,8 @@ namespace AutoLighterV2
             int leftBeatIdx = 0, rightBeatIdx = 0;
             int windowSize = 4;
 
-            for (int curQuarterBeat = 0; curQuarterBeat <= qbEnd; curQuarterBeat++)
+            // count notes in window +-2 around each quarter beat
+            for (int curQuarterBeat = qbStart; curQuarterBeat <= qbEnd; curQuarterBeat++)
             {
                 float center = curQuarterBeat / 4f;
                 float left = center - windowSize / 2f;
@@ -56,6 +60,7 @@ namespace AutoLighterV2
             }
 
             if (counts.Count == 0) return null;
+            // get min/max
             float minVal = float.MaxValue, maxVal = float.MinValue;
             for (int i = 0; i < counts.Count; i++)
             {
@@ -63,12 +68,12 @@ namespace AutoLighterV2
                 if (counts[i] > maxVal) maxVal = counts[i];
             }
 
+            // map vals to 0 - 1
             var mapped = new List<float>(counts.Count);
             for (int i = 0; i < counts.Count; i++)
             {
-                float norm = (counts[i] - minVal) / (maxVal - minVal);
-                float brightness = cfg.MinBrightness + norm * (cfg.MaxBrightness - cfg.MinBrightness);
-                mapped.Add(Clamp(brightness, cfg.MinBrightness, cfg.MaxBrightness));
+                float v = maxVal - minVal < 1e-6 ? 0.5f : (counts[i] - minVal) / (maxVal - minVal);
+                mapped.Add(v);
             }
 
             return new QBBrightness(qbStart, mapped);
@@ -92,10 +97,12 @@ namespace AutoLighterV2
         {
             intervals = intervals.OrderBy(iv => iv.First()).ToList();
             int i = 0;
+            // go through intervals and make sure beats are at least threshold apart
             while (i < intervals.Count - 1)
             {
                 if (intervals[i][1] - intervals[i][0] < cfg.AntiFlickerThreshold)
                 {
+                    // if too close, merge with next
                     var merged = new List<float> { intervals[i][0], intervals[i + 1].Last() };
                     intervals[i] = merged;
                     intervals.RemoveAt(i + 1);
@@ -108,11 +115,13 @@ namespace AutoLighterV2
 
         private static List<List<float>> GetWallStrobes(List<BaseObstacle> walls)
         {
+            // get sorted distinct beats of walls shorter than 0.25 beats
             var shortBeats = walls.Where(w => w.Duration < 0.25f).Select(w => w.JsonTime).Distinct().OrderBy(b => b)
                 .ToList();
             var strobes = new List<List<float>>();
             float? last = null;
             var cur = new List<float>();
+            // add to strobes if >=3 short walls in a row with <0.25 beat gap
             foreach (var b in shortBeats)
             {
                 if (last == null || b - last < 0.25f)
@@ -135,18 +144,18 @@ namespace AutoLighterV2
 
         private static List<float> GetSprinkles(List<BaseObstacle> walls, AutoLightV2Config cfg)
         {
+            // get sorted distinct beats of walls shorter than 1/3 beats
             var shortBeats = walls.Where(w => w.Duration < 1f / 3f).Select(w => w.JsonTime).Distinct().OrderBy(b => b).ToList();
             if (!cfg.WallStrobes) return shortBeats;
+            // make sure they are at least 0.25 beats apart (not part of strobe)
+            var res = new List<float>();
+            float? last = null;
+            foreach (var b in shortBeats)
             {
-                var res = new List<float>();
-                float? last = null;
-                foreach (var b in shortBeats)
-                {
-                    if (last == null || b - last >= 0.25f) res.Add(b);
-                    last = b;
-                }
-                return res;
+                if (last == null || b - last >= 0.25f) res.Add(b);
+                last = b;
             }
+            return res;
         }
 
         private static (List<List<float>> left, List<List<float>> right) GetArcIntervals(List<BaseSlider> arcs)
@@ -172,8 +181,10 @@ namespace AutoLighterV2
             int i = 0;
             while (i < iv.Count - 1)
             {
-                if (Math.Abs(iv[i][iv[i].Count - 1] - iv[i + 1][0]) < 1e-6)
+                // check if end of current is touching start of next
+                if (Math.Abs(iv[i][1] - iv[i + 1][0]) < 1e-6)
                 {
+                    // merge
                     iv[i].Add(iv[i + 1][1]);
                     iv.RemoveAt(i + 1);
                 }
@@ -193,6 +204,7 @@ namespace AutoLighterV2
                 if (w.Duration >= cfg.MinWallLength && (!cfg.WallStrobes || w.Duration >= 0.25f) &&
                     (!cfg.WallSprinkles || w.Duration >= 1f / 3f))
                 {
+                    // add all walls longer than min length and not strobes/sprinkles
                     list.Add(new List<float> { w.JsonTime, w.JsonTime + w.Duration });
                 }
             }
@@ -220,8 +232,10 @@ namespace AutoLighterV2
             int i = 0;
             while (i < iv.Count - 1)
             {
+                // check if end of current overlaps start of next
                 if (iv[i][1] >= iv[i + 1][0])
                 {
+                    // merge by taking max end
                     iv[i][1] = Math.Max(iv[i][1], iv[i + 1][1]);
                     iv.RemoveAt(i + 1);
                 }
@@ -236,14 +250,7 @@ namespace AutoLighterV2
             var beats = colorNotes.Select(n => n.JsonTime).Distinct().OrderBy(b => b).ToList();
             var avg = AvgDistance(beats);
             var intervals = new List<List<float>>();
-            // for (int i = 2; i < beats.Count; i++)
-            // {
-            //     if (beats[i - 1] - beats[i - 2] > avg)
-            //     {
-            //         if (beats[i] - beats[i - 1] > avg) intervals.Add(new List<float> { beats[i - 2], beats[i - 1] });
-            //         else intervals.Add(new List<float> { beats[i - 2], beats[i - 1], beats[i] });
-            //     }
-            // }
+            // add intervals where note distance > avg
             for (int i = 1; i < beats.Count; i++)
             {
                 if (beats[i] - beats[i - 1] > avg)
@@ -260,14 +267,7 @@ namespace AutoLighterV2
             var beats = colorNotes.Select(n => n.JsonTime).Distinct().OrderBy(b => b).ToList();
             var avg = AvgDistance(beats);
             var intervals = new List<List<float>>();
-            // for (int i = 2; i < beats.Count; i++)
-            // {
-            //     if (beats[i - 1] - beats[i - 2] < avg)
-            //     {
-            //         if (beats[i] - beats[i - 1] < avg) intervals.Add(new List<float> { beats[i - 2], beats[i - 1] });
-            //         else intervals.Add(new List<float> { beats[i - 2], beats[i - 1], beats[i] });
-            //     }
-            // }
+            // add intervals where note distance <= avg
             for (int i = 1; i < beats.Count; i++)
             {
                 if (beats[i] - beats[i - 1] <= avg)
@@ -277,23 +277,73 @@ namespace AutoLighterV2
             return intervals;
         }
 
-        private static void RemoveEventsWhileStrobe(List<float> s, List<List<float>> lst)
+        private static void RemoveEventsWhileStrobe(List<float> s, List<List<float>> lst, AutoLightV2Config cfg)
         {
             int i = 0;
             while (i < lst.Count)
             {
-                if (s[0] <= lst[i][0] && lst[i][0] <= s.Last() || s[0] <= lst[i].Last() && lst[i].Last() <= s.Last())
+                // No overlap
+                if (lst[i][1] < s[0] || lst[i][0] > s.Last())
+                {
+                    i++;
+                    continue;
+                }
+
+                // Fully inside
+                if (lst[i][0] >= s[0] && lst[i][1] <= s.Last())
+                {
                     lst.RemoveAt(i);
+                    continue;
+                }
+
+                // Partial overlap
+                bool changed = false;
+                if (s[0] > lst[i][0] && s[0] - lst[i][0] >= cfg.AntiFlickerThreshold)
+                {
+                    if (s.Last() < lst[i][1] && lst[i][1] - s.Last() >= cfg.AntiFlickerThreshold)
+                    {
+                        // split
+                        var newInterval = new List<float> { s.Last() + 1f / 64f, lst[i][1] };
+                        lst[i][1] = s[0];
+                        lst.Insert(i + 1, newInterval);
+                        changed = true;
+                        i++;
+                    }
+                    else
+                    {
+                        // trim right
+                        lst[i][1] = s[0];
+                        changed = true;
+                    }
+                }
+                else if (s.Last() < lst[i][1] && lst[i][1] - s.Last() >= cfg.AntiFlickerThreshold)
+                {
+                    // trim left
+                    lst[i][0] = s.Last() + 1f / 64f;
+                    changed = true;
+                }
+
+                if (!changed) lst.RemoveAt(i);
                 else i++;
             }
+
         }
 
-        private static void RemoveEventsWhileSprinkle(float s, List<List<float>> lst)
+        private static void RemoveEventsWhileSprinkle(float s, List<List<float>> lst, AutoLightV2Config cfg)
         {
             int i = 0;
             while (i < lst.Count)
             {
-                if (lst[i][0] <= s && s <= lst[i].Last()) lst.RemoveAt(i);
+                // only keep in front of sprinkle if large enough
+                if (s > lst[i][0] && s < lst[i][1])
+                {
+                    if (s - lst[i][0] >= cfg.AntiFlickerThreshold)
+                    {
+                        lst[i][1] = s; // trim right
+                        i++;
+                    }
+                    else lst.RemoveAt(i);
+                }
                 else i++;
             }
         }
@@ -351,22 +401,24 @@ namespace AutoLighterV2
 
         private static List<List<float>> MergeAndDedup(List<List<float>> iv)
         {
+            // order by start, dedup and order each interval
             iv = iv.OrderBy(x => x[0]).Select(x => x.Distinct().OrderBy(v => v).ToList()).ToList();
+
             int i = 0;
+            // merge overlapping intervals
             while (i < iv.Count - 1)
             {
+                // check if current overlaps next
                 if (iv[i].Last() >= iv[i + 1].First())
                 {
+                    // merge first then dedup and order
                     iv[i] = iv[i].Concat(iv[i + 1]).Distinct().OrderBy(v => v).ToList();
                     iv.RemoveAt(i + 1);
                 }
-                else
-                {
-                    iv[i] = iv[i].Distinct().OrderBy(v => v).ToList();
-                    i++;
-                }
+                else i++;
             }
 
+            // handle last interval
             if (iv.Count > 0)
             {
                 iv[iv.Count - 1] = iv[iv.Count - 1].Distinct().OrderBy(v => v).ToList();
@@ -385,6 +437,7 @@ namespace AutoLighterV2
         {
             var sorted = notes.OrderBy(n => n.JsonTime).ToList();
             var beats = new List<float>();
+            // find all beats with more than 1 note
             for (int i = 1; i < sorted.Count; i++)
             {
                 if (Math.Abs(sorted[i].JsonTime - sorted[i - 1].JsonTime) < 1e-6)
@@ -396,6 +449,8 @@ namespace AutoLighterV2
             if (beats.Count < 2) return intervals;
             float avg = AvgDistance(beats);
             float length = avg < 4f ? 1f : 2f;
+
+            // create intervals of fixed length or until next beat if closer
             for (int i = 1; i < beats.Count; i++)
             {
                 if (beats[i] - beats[i - 1] <= length)
@@ -409,25 +464,30 @@ namespace AutoLighterV2
 
         private static int GetLaserSpeed(float beat, QBBrightness qb, AutoLightV2Config cfg)
         {
+            if (qb?.Values == null || qb.Values.Count == 0)
+                return 1;
+
             int qbIndex = (int)Math.Round(beat * 4) - qb.StartQB;
             qbIndex = Math.Max(0, Math.Min(qb.Values.Count - 1, qbIndex));
-            float intensity = (qb.Values[qbIndex] - cfg.MinBrightness) / (cfg.MaxBrightness - cfg.MinBrightness);
-            return (int)Math.Max(1, Math.Round(intensity * 8 * cfg.LaserSpeedMulti));
+
+            // map qb value (0-1) to speed (1-8) scaled by config multiplier
+            return (int)Math.Max(1, Math.Round(qb.Values[qbIndex] * 8 * cfg.LaserSpeedMulti));
         }
 
         public static List<BaseEvent> GenerateAll(MapEditorState state, AutoLightV2Config cfg)
         {
-            // Gather map objects
-            var notes = state.Notes.Where(n => n.Type == 0 || n.Type == 1)
+            if (state?.Notes == null || state.Obstacles == null || state.Sliders == null)
+                return new List<BaseEvent>();
+
+            // if light bombs, treat them as color notes
+            var notes = state.Notes.Where(n => n.Type == 0 || n.Type == 1 || (cfg.LightBombs && n.Type == 3))
                 .OrderBy(n => n.JsonTime).ToList();
-            var bombs = state.Notes.Where(n => n.Type == 3).ToList();
+            var bombs = cfg.LightBombs ? new List<BaseNote>() : state.Notes.Where(n => n.Type == 3).ToList();
             var obstacles = state.Obstacles.OrderBy(o => o.JsonTime).ToList();
             var sliders = state.Sliders.OrderBy(s => s.JsonTime).ToList();
 
-            // Build per-quarter-beat brightness map
-            var qb = BuildQuarterBeatBrightness(state, cfg);
+            var qb = BuildQuarterBeatBrightness(state);
 
-            // base intervals
             var bl = GetBottomLights(notes);
             var sl = GetBlockShortIntervals(notes);
 
@@ -435,14 +495,13 @@ namespace AutoLighterV2
 
             var rnd = new Random(0);
 
-            // strobes/sprinkles from walls
             if (cfg.WallStrobes)
             {
                 var strobes = GetWallStrobes(obstacles);
                 foreach (var s in strobes)
                 {
-                    RemoveEventsWhileStrobe(s, sl);
-                    if (!cfg.StrobesCenterOnly) RemoveEventsWhileStrobe(s, bl);
+                    RemoveEventsWhileStrobe(s, sl, cfg);
+                    if (!cfg.StrobesCenterOnly) RemoveEventsWhileStrobe(s, bl, cfg);
                 }
 
                 result.AddRange(GenerateStrobeEvents(strobes, cfg, qb, rnd));
@@ -474,8 +533,8 @@ namespace AutoLighterV2
 
                 foreach (var s in spr)
                 {
-                    RemoveEventsWhileSprinkle(s, sl);
-                    RemoveEventsWhileSprinkle(s, bl);
+                    RemoveEventsWhileSprinkle(s, sl, cfg);
+                    RemoveEventsWhileSprinkle(s, bl, cfg);
                 }
 
                 result.AddRange(GenerateSprinkleEvents(spr, cfg, qb, rnd));
@@ -485,10 +544,12 @@ namespace AutoLighterV2
 
             var shortLasers = new List<List<float>>();
             var middleLights = new List<List<float>>();
+            var middleToggle = false;
             foreach (var iv in sl)
             {
-                if (rnd.NextDouble() < 0.65) middleLights.Add(iv);
+                if ((!cfg.RemoveRandomness && rnd.NextDouble() < 0.65) || (cfg.RemoveRandomness && middleToggle)) middleLights.Add(iv);
                 else shortLasers.Add(iv);
+                middleToggle = !middleToggle;
             }
 
             var (l, r) = GetLasers(sliders, obstacles, shortLasers, notes, cfg);
@@ -504,7 +565,7 @@ namespace AutoLighterV2
             result.AddRange(GenerateShortLightEvents(middleLights, cfg, qb, rnd));
             result.AddRange(GenerateBottomLightEvents(bl, cfg, qb, rnd));
 
-            if (cfg.ColorMode == 2) OverrideColorSwitching(result, cfg);
+            if (cfg.ColorMode == 2 || cfg.ColorMode == 3) OverrideColorSwitching(result, cfg, state.Bookmarks);
 
             result.AddRange(GenerateRotationEvents(notes, cfg, qb, state.Bookmarks));
             result.AddRange(GenerateZoomEvents(notes, cfg, qb, state.Bookmarks));
@@ -516,11 +577,15 @@ namespace AutoLighterV2
 
         private static float BrightAt(float beat, QBBrightness qb, AutoLightV2Config cfg)
         {
-            if (qb == null || qb.Values == null || qb.Values.Count == 0 || !cfg.UseMapIntensityForBrightness)
+            if (qb?.Values == null || qb.Values.Count == 0 || !cfg.UseMapIntensityForBrightness || cfg.MaxBrightness <= cfg.MinBrightness)
                 return cfg.MaxBrightness;
+
             int qbIndex = (int)Math.Round(beat * 4) - qb.StartQB;
             qbIndex = Math.Max(0, Math.Min(qb.Values.Count - 1, qbIndex));
-            return (float)Math.Round(qb.Values[qbIndex], 1);
+
+            // map qb value (0-1) to min/max brightness
+            var brightness = qb.Values[qbIndex] * (cfg.MaxBrightness - cfg.MinBrightness) + cfg.MinBrightness;
+            return (float)Math.Round(brightness, 2);
         }
 
         private static List<BaseEvent> GenerateLaserLightEvents(List<List<float>> left, List<List<float>> right, AutoLightV2Config cfg, QBBrightness qb, Random rnd)
@@ -529,11 +594,13 @@ namespace AutoLighterV2
             foreach (var tuple in new[] { new { et = 2, side = left }, new { et = 3, side = right } })
             {
                 int color = 0;
+                // each interval contains list of beats, first is start, last is end, in between are fade points
                 foreach (var iv in tuple.side)
                 {
                     if (iv.Count < 2) continue;
-                    if (iv.Last() - iv[iv.Count - 2] > cfg.LaserFadeOutLength)
+                    if (iv.Last() - iv[iv.Count - 2] > cfg.LaserFadeOutLength && cfg.LaserFadeOutLength > 1f / 64f)
                     {
+                        // insert fade out point depending on config
                         iv.Insert(iv.Count - 1, iv.Last() - cfg.LaserFadeOutLength);
                     }
 
@@ -541,6 +608,7 @@ namespace AutoLighterV2
                     events.Add(new BaseEvent { JsonTime = iv[0], Type = 10 + tuple.et, Value = GetLaserSpeed(iv[0], qb, cfg), FloatValue = 1 }); // start speed
 
                     int flipColor = color;
+                    // mid fade points
                     for (int i = 1; i < iv.Count - 1; i++)
                     {
                         if (cfg.LaserColorFade && i != iv.Count - 2) flipColor = 1 - flipColor;
@@ -551,7 +619,15 @@ namespace AutoLighterV2
                         events.Add(new BaseEvent { JsonTime = iv[i], Type = tuple.et, Value = 4 + 4 * flipColor, FloatValue = BrightAt(iv[i], qb, cfg) }); // mid fade
                     }
 
-                    events.Add(new BaseEvent { JsonTime = iv.Last() - 1f / 64f, Type = tuple.et, Value = 4 + 4 * color, FloatValue = 0f }); // end fade out
+                    if (cfg.LaserFadeOutLength > 1f / 64f)
+                    {
+                        events.Add(new BaseEvent { JsonTime = iv.Last() - 1f / 64f, Type = tuple.et, Value = 4 + 4 * color, FloatValue = 0f }); // end fade out
+                    }
+                    else
+                    {
+                        // no fade out, stay bright until end
+                        events.Add(new BaseEvent { JsonTime = iv.Last() - 1f / 64f, Type = tuple.et, Value = 4 + 4 * color, FloatValue = BrightAt(iv.Last() - 1f / 64f, qb, cfg) });
+                    }
 
                     color = cfg.ColorMode == 1 ? 1 - color : rnd.Next(0, 2);
                 }
@@ -612,32 +688,18 @@ namespace AutoLighterV2
             var events = new List<BaseEvent>();
             int color = 0;
             var lanes = cfg.StrobesCenterOnly ? new[] { 4 } : new[] { 0, 4 };
-            foreach (var iv in strobes)
+            foreach (var strobe in strobes)
             {
-                float avg = 0;
-                for (int i = 0; i < iv.Count - 1; i++) avg += (iv[i + 1] - iv[i]);
-                avg /= Math.Max(iv.Count - 1, 1);
                 foreach (var et in lanes)
                 {
-                    if (avg > 0.2f)
+                    // place flash on every wall and add off in between
+                    for (var j = 0; j < strobe.Count - 1; j++)
                     {
-                        for (int j = 0; j < iv.Count - 1; j++)
-                        {
-                            events.Add(new BaseEvent { JsonTime = iv[j], Type = et, Value = 3 + 4 * color, FloatValue = BrightAt(iv[j], qb, cfg) });
-                            events.Add(new BaseEvent { JsonTime = iv[j] + avg / 2f, Type = et, Value = 0, FloatValue = BrightAt(iv[j] + avg / 2f, qb, cfg) });
-                        }
-
-                        events.Add(new BaseEvent { JsonTime = iv.Last(), Type = et, Value = 3 + 4 * color, FloatValue = BrightAt(iv.Last(), qb, cfg) });
+                        events.Add(new BaseEvent { JsonTime = strobe[j], Type = et, Value = 3 + 4 * color, FloatValue = BrightAt(strobe[j], qb, cfg) });
+                        events.Add(new BaseEvent { JsonTime = strobe[j] + (strobe[j + 1] - strobe[j]) / 2f, Type = et, Value = 0, FloatValue = 1f });
                     }
-                    else
-                    {
-                        int tp = 1;
-                        foreach (var b in iv)
-                        {
-                            events.Add(new BaseEvent { JsonTime = b, Type = et, Value = (tp == 1) ? 3 + 4 * color : 0, FloatValue = BrightAt(b, qb, cfg) });
-                            tp = 1 - tp;
-                        }
-                    }
+                    // last flash
+                    events.Add(new BaseEvent { JsonTime = strobe.Last(), Type = et, Value = 3 + 4 * color, FloatValue = BrightAt(strobe.Last(), qb, cfg) });
                 }
 
                 color = cfg.ColorMode == 1 ? 1 - color : rnd.Next(0, 2);
@@ -654,34 +716,43 @@ namespace AutoLighterV2
             int color = 0;
             foreach (var b in sprinkles)
             {
+                // pick random et different from last or next in sequence if no randomness
                 int r;
-                do
+                if (cfg.RemoveRandomness)
                 {
-                    r = rnd.Next(0, 3);
-                } while (r == lastRand);
-
+                    r = (lastRand + 1) % 3;
+                }
+                else
+                {
+                    do
+                    {
+                        r = rnd.Next(0, 3);
+                    } while (r == lastRand);
+                }
                 lastRand = r;
-                events.Add(new BaseEvent { JsonTime = b, Type = ets[r], Value = 3 + (color < 4 ? 4 : 0), FloatValue = BrightAt(b, qb, cfg) });
-                color = cfg.ColorMode == 1 ? (color + 1) % 8 : rnd.Next(0, 8);
+
+                events.Add(new BaseEvent { JsonTime = b, Type = ets[r], Value = 3 + 4 * color, FloatValue = BrightAt(b, qb, cfg) });
+                color = cfg.ColorMode == 1 ? 1 - color : rnd.Next(0, 2);
             }
 
             return events;
         }
 
-        private static void OverrideColorSwitching(List<BaseEvent> lights, AutoLightV2Config cfg)
+        private static void OverrideColorSwitching(List<BaseEvent> lights, AutoLightV2Config cfg, List<BaseBookmark> bookmarks)
         {
+            // sort all lights by beat and override colors based on color switch interval
             lights.Sort((a, b) => a.JsonTime.CompareTo(b.JsonTime));
             int color = 0;
             if (lights.Count == 0) return;
             float start = (float)Math.Floor(lights.First().JsonTime);
             float end = (float)Math.Floor(lights.Last().JsonTime);
-            for (float beat = start + cfg.ColorSwitchBeats; beat < end; beat += cfg.ColorSwitchBeats)
+            for (float beat = AlignToBar(start, bookmarks) + cfg.ColorSwitchBeats; beat < end; beat += cfg.ColorSwitchBeats)
             {
                 foreach (var lt in lights)
                 {
                     if (beat - cfg.ColorSwitchBeats <= lt.JsonTime && lt.JsonTime < beat)
                     {
-                        if (lt.Type == 2 || lt.Type == 3)
+                        if (lt.Type == 2 || lt.Type == 3 || cfg.ColorMode == 3)
                         {
                             if (lt.Value > 0 && lt.Value < 5 && color == 1) lt.Value += 4;
                             else if (lt.Value > 4 && lt.Value < 9 && color == 0) lt.Value -= 4;
@@ -702,14 +773,15 @@ namespace AutoLighterV2
         {
             var events = new List<BaseEvent>();
             if (notes.Count == 0) return events;
-            float first = notes[0].JsonTime;
-            float last = notes.Last().JsonTime;
-            float threshold = (cfg.MinBrightness + cfg.MaxBrightness) / 2f;
-            for (float b = AlignToBar(first, bookmarks); b < last; b += cfg.RotationInterval)
+            var first = notes[0].JsonTime;
+            var last = notes.Last().JsonTime;
+            const float threshold = 0.5f;
+            for (var b = AlignToBar(first, bookmarks); b < last; b += cfg.RotationInterval)
             {
                 if (qb != null && cfg.DoubleAtIntenseSections)
                 {
-                    int idx = (int)Math.Max(0, Math.Min(qb.Values.Count - 1, Math.Round(b * 4)));
+                    // check if intensity is above threshold and add mid-rotation if so
+                    var idx = Math.Max(0, Math.Min(qb.Values.Count - 1, (int)Math.Round(b * 4) - qb.StartQB));
                     if (qb.Values[idx] > threshold && b + cfg.RotationInterval / 2f < last)
                         events.Add(new BaseEvent { JsonTime = b + cfg.RotationInterval / 2f, Type = 8, Value = 7, FloatValue = 1f });
                 }
@@ -724,14 +796,15 @@ namespace AutoLighterV2
         {
             var events = new List<BaseEvent>();
             if (notes.Count == 0) return events;
-            float first = notes[0].JsonTime;
-            float last = notes.Last().JsonTime;
-            float threshold = (cfg.MinBrightness + cfg.MaxBrightness) / 2f;
-            for (float b = AlignToBar(first, bookmarks); b < last; b += cfg.ZoomInterval)
+            var first = notes[0].JsonTime;
+            var last = notes.Last().JsonTime;
+            const float threshold = 0.5f;
+            for (var b = AlignToBar(first, bookmarks); b < last; b += cfg.ZoomInterval)
             {
                 if (qb != null && cfg.DoubleAtIntenseSections)
                 {
-                    int idx = (int)Math.Max(0, Math.Min(qb.Values.Count - 1, Math.Round(b * 4)));
+                    // check if intensity is above threshold and add mid-zoom if so
+                    var idx = Math.Max(0, Math.Min(qb.Values.Count - 1, (int)Math.Round(b * 4) - qb.StartQB));
                     if (qb.Values[idx] > threshold && b + cfg.ZoomInterval / 2f < last)
                         events.Add(new BaseEvent { JsonTime = b + cfg.ZoomInterval / 2f, Type = 9, Value = 1, FloatValue = 1f });
                 }
@@ -745,7 +818,7 @@ namespace AutoLighterV2
         private static float AlignToBar(float firstBeat, List<BaseBookmark> bookmarks = null)
         {
             int targetMod = (int)Math.Ceiling(firstBeat) % 4;
-
+            // uses bookmarks to determine most common mod 4 to align to
             if (bookmarks != null && bookmarks.Count > 0)
             {
                 var fullBeatBookmarks = bookmarks.Where(b => Math.Abs(b.JsonTime - Math.Round(b.JsonTime)) < 0.1f)
@@ -780,7 +853,7 @@ namespace AutoLighterV2
         {
             var events = new List<BaseEvent>();
             if (cfg.BoostMode == 0) return events;
-            if (cfg.BoostMode == 3) return state.ExistingBoosts.ToList();
+            if (cfg.BoostMode == 3) return state.ExistingBoosts?.ToList() ?? new List<BaseEvent>();
 
             var notes = state.Notes.Where(n => n.Type != 3).OrderBy(n => n.JsonTime).ToList();
             if (notes.Count == 0) return events;
@@ -799,10 +872,10 @@ namespace AutoLighterV2
             else
             {
                 // Mode 1: from brightness
-                boostBeats = GenerateBoostBeatsFromBrightness(qb, cfg, notes[0].JsonTime, notes.Last().JsonTime);
+                boostBeats = GenerateBoostBeatsFromIntensity(qb, cfg);
                 if (state.Bookmarks != null && state.Bookmarks.Count > 0)
                 {
-                    boostBeats = SnapBoostBeatsToBookmarks(boostBeats, state.Bookmarks);
+                    boostBeats = SnapBoostBeatsToBookmarks(boostBeats, state.Bookmarks, notes[0].JsonTime, notes.Last().JsonTime);
                 }
             }
 
@@ -817,30 +890,32 @@ namespace AutoLighterV2
             return events;
         }
 
-        private static List<float> GenerateBoostBeatsFromBrightness(QBBrightness qb, AutoLightV2Config cfg, float firstBeat, float lastBeat)
+        private static List<float> GenerateBoostBeatsFromIntensity(QBBrightness qb, AutoLightV2Config cfg)
         {
             var boostBeats = new List<float>();
 
-            float threshold = cfg.MaxBrightness;
+            float threshold = 1.0f;
             float percentBoosted = 0f;
 
-            while (percentBoosted < cfg.BoostPercent && threshold > cfg.MinBrightness)
+            // gradually lower threshold until enough boost time is found
+            while (percentBoosted < cfg.BoostPercent && threshold > 0f)
             {
                 boostBeats.Clear();
                 bool boosting = false;
                 int cntAbove = 0, cntBelow = 0;
                 float totalBoostTime = 0f;
 
+                // count consecutive quarters above/below threshold
                 for (int i = 0; i < qb.Values.Count; i++)
                 {
-                    var vol = qb.Values[i];
-                    if (vol > threshold)
+                    if (qb.Values[i] > threshold)
                     {
                         cntAbove++;
                         cntBelow = 0;
                         if (!boosting && cntAbove >= cfg.MinBoostLength * 4)
                         {
-                            float beatStart = (i - cfg.MinBoostLength * 4 + qb.StartQB) / 4f;
+                            // start boost and calculate start beat
+                            float beatStart = (i - cntAbove + 1 + qb.StartQB) / 4f;
                             boostBeats.Add(beatStart);
                             boosting = true;
                         }
@@ -851,7 +926,8 @@ namespace AutoLighterV2
                         cntAbove = 0;
                         if (boosting && cntBelow > cfg.MinBoostLength * 4)
                         {
-                            float beatEnd = (i - cfg.MinBoostLength * 4 + qb.StartQB) / 4f;
+                            // end boost and add to total boost time
+                            float beatEnd = (i - cntBelow + 1 + qb.StartQB) / 4f;
                             totalBoostTime += (beatEnd - boostBeats.Last()) * 4;
                             boostBeats.Add(beatEnd);
                             boosting = false;
@@ -861,8 +937,10 @@ namespace AutoLighterV2
 
                 if (boosting)
                 {
-                    totalBoostTime += ((qb.Values.Count - 1 + qb.StartQB) / 4f - boostBeats.Last()) * 4;
-                    boostBeats.Add((qb.Values.Count - 1 + qb.StartQB) / 4f);
+                    // end boost at song end
+                    float finalBeat = (qb.Values.Count - 1 + qb.StartQB) / 4f;
+                    totalBoostTime += (finalBeat - boostBeats.Last()) * 4;
+                    boostBeats.Add(finalBeat);
                 }
                 percentBoosted = totalBoostTime / qb.Values.Count;
 
@@ -872,7 +950,7 @@ namespace AutoLighterV2
             return boostBeats;
         }
 
-        private static List<float> SnapBoostBeatsToBookmarks(List<float> boostBeats, List<BaseBookmark> bookmarks)
+        private static List<float> SnapBoostBeatsToBookmarks(List<float> boostBeats, List<BaseBookmark> bookmarks, float minBeat, float maxBeat)
         {
             if (bookmarks == null || bookmarks.Count == 0 || boostBeats.Count == 0)
                 return boostBeats;
@@ -880,6 +958,7 @@ namespace AutoLighterV2
             var result = new List<float>();
             var usedBookmarks = new HashSet<int>();
 
+            // for each boost beat, find the closest bookmark within 20 beats that is not already used
             foreach (var beat in boostBeats)
             {
                 float closestBeat = beat;
@@ -891,6 +970,8 @@ namespace AutoLighterV2
                     if (usedBookmarks.Contains(i)) continue;
 
                     float bookmarkBeat = bookmarks[i].JsonTime;
+                    if (bookmarkBeat < minBeat || bookmarkBeat > maxBeat) continue;
+
                     float distance = Math.Abs(bookmarkBeat - beat);
 
                     if (distance <= 20f && distance < minDistance)

@@ -10,26 +10,28 @@ namespace AutoLighterV2
     public class AutoLightV2Config
     {
         public bool UseWalls { get; set; } = false;
-        public float MinWallLength { get; set; } = 0.75f;
+        public float MinWallLength { get; set; } = 1.50f;
         public float AntiFlickerThreshold { get; set; } = 0.25f;
         public float LaserSpeedMulti { get; set; } = 0.8f;
         public bool WallStrobes { get; set; } = true;
         public bool StrobesCenterOnly { get; set; } = true;
-        public bool WallSprinkles { get; set; } = true;
-        public int ColorMode { get; set; } = 2; // 0=random per event, 1=alternating, 2=override by bars
-        public int ColorSwitchBeats { get; set; } = 16;
-        public bool LaserColorFade { get; set; } = true;
+        public bool WallSprinkles { get; set; } = false;
+        public int ColorMode { get; set; } = 2; // 0=random per event, 1=alternating, 2=override by bars, 3=override globally
+        public float ColorSwitchBeats { get; set; } = 8.0f;
+        public bool LaserColorFade { get; set; } = false;
         public float LaserFadeOutLength { get; set; } = 0.5f;
         public bool ResetLongLaserSpeeds { get; set; } = false;
         public bool UseMapIntensityForBrightness { get; set; } = true;
         public float MinBrightness { get; set; } = 0.9f;
         public float MaxBrightness { get; set; } = 1.2f;
-        public int RotationInterval { get; set; } = 8;
-        public int ZoomInterval { get; set; } = 16;
+        public float RotationInterval { get; set; } = 8.0f;
+        public float ZoomInterval { get; set; } = 16.0f;
         public bool DoubleAtIntenseSections { get; set; } = true;
-        public int BoostMode { get; set; } = 1; // 0=off, 1=from intensity, 2=periodic, 3=keep existing
+        public int BoostMode { get; set; } = 0; // 0=off, 1=from intensity, 2=periodic, 3=keep existing
         public float BoostPercent { get; set; } = 0.3f;
-        public int MinBoostLength { get; set; } = 8;
+        public float MinBoostLength { get; set; } = 8.0f;
+        public bool RemoveRandomness { get; set; } = false;
+        public bool LightBombs { get; set; } = false;
     }
 
     public static class ConfigManager
@@ -81,6 +83,12 @@ namespace AutoLighterV2
             {
                 // Config save error is non-critical
             }
+        }
+
+        public static void Reset()
+        {
+            Data = new AutoLightV2Config();
+            Save();
         }
     }
 }
