@@ -13,6 +13,7 @@ namespace AutoLighterV2
 {
     public class UI
     {
+        private GameObject _menuCanvas;
         private GameObject _autolighterMenu;
         private readonly AutoLighterV2 _autolighter;
         private readonly ExtensionButton _extensionBtn = new ExtensionButton();
@@ -45,9 +46,25 @@ namespace AutoLighterV2
         public void AddMenu(MapEditorUI mapEditorUI)
         {
             _mapEditorUI = mapEditorUI;
-            CanvasGroup parent = mapEditorUI.MainUIGroup[5];
+            // The editor lays out each widget on its own ScreenSpaceCamera canvas, so there is
+            // no full-screen canvas to anchor against (anchoring against one lands the menu off
+            // in camera space). Host the menu on a dedicated full-screen overlay canvas where
+            // top-right anchoring maps to real screen pixels and draws above everything.
+            var uiRoot = mapEditorUI.MainUIGroup[5].transform.parent;
+            _menuCanvas = new GameObject("Autolighter V2 Canvas", typeof(RectTransform));
+            _menuCanvas.transform.SetParent(uiRoot, false);
+            var hostCanvas = _menuCanvas.AddComponent<Canvas>();
+            hostCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            hostCanvas.sortingOrder = 1000;
+            var scaler = _menuCanvas.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1094.1f, 600f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+            _menuCanvas.AddComponent<GraphicRaycaster>();
+
             _autolighterMenu = new GameObject("Autolighter V2 Menu");
-            _autolighterMenu.transform.parent = parent.transform;
+            _autolighterMenu.transform.SetParent(_menuCanvas.transform, false);
 
             AttachTransform(_autolighterMenu, 320, 435, 1, 1, 0, 0, 1, 1);
 
@@ -57,8 +74,11 @@ namespace AutoLighterV2
             image.color = new Color(0.24f, 0.24f, 0.24f);
 
             AddLabel(_autolighterMenu.transform, "Autolighter V2", "Autolighter V2", new Vector2(0, -18));
-            AddResetButton(_autolighterMenu.transform, "ResetDefaults", new Vector2(126, -18),
+            AddResetButton(_autolighterMenu.transform, "ResetDefaults", new Vector2(112, -18),
                 () => { ResetToDefaults(); }, "Reset all settings to default values");
+            AddResetButton(_autolighterMenu.transform, "Close", new Vector2(146, -18),
+                () => { _autolighterMenu.SetActive(false); }, "Close this menu (click the toolbar icon to reopen)",
+                "X", 24);
 
             float row = 20f;
             float space = 11f;
@@ -441,15 +461,15 @@ namespace AutoLighterV2
         }
 
         private void AddResetButton(Transform parent, string title, Vector2 pos, UnityAction onClick,
-            string tooltip = "")
+            string tooltip = "", string text = "Reset", float width = 40)
         {
             var button = Object.Instantiate(PersistentUI.Instance.ButtonPrefab, parent);
-            MoveTransform(button.transform, 40, 18, 0.5f, 1, pos.x, pos.y);
+            MoveTransform(button.transform, width, 18, 0.5f, 1, pos.x, pos.y);
 
             button.name = title;
             button.Button.onClick.AddListener(onClick);
 
-            button.SetText("Reset");
+            button.SetText(text);
             button.Text.enableAutoSizing = false;
             button.Text.fontSize = 12;
             button.Text.alignment = TextAlignmentOptions.Center;
@@ -579,7 +599,7 @@ namespace AutoLighterV2
         {
             ConfigManager.Reset();
 
-            Object.Destroy(_autolighterMenu);
+            Object.Destroy(_menuCanvas);
             AddMenu(_mapEditorUI);
             _autolighterMenu.SetActive(true);
         }
