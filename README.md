@@ -35,19 +35,19 @@ If you want to copy the generated lightevents to all other difficulties, use the
 
 ### Configuration
 
-1. Create a `Directory.Build.props.user` file in the solution root (if it doesn't exist)
+1. Create an `AutoLighterV2/AutoLighterV2.csproj.user` file (if it doesn't exist)
 2. Set your ChroMapper installation path:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
-<Project>
-    <PropertyGroup>
-        <ChroMapperPath>YOUR_PATH_TO_CHROMAPPER</ChroMapperPath>
-    </PropertyGroup>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ChroMapperDir>YOUR_PATH_TO_CHROMAPPER</ChroMapperDir>
+  </PropertyGroup>
 </Project>
 ```
 
-**Note:** The `Directory.Build.props.user` file is git-ignored and contains your local paths.
+**Note:** The `*.csproj.user` file is git-ignored and contains your local paths.
 
 ### Building
 
@@ -55,12 +55,9 @@ If you want to copy the generated lightevents to all other difficulties, use the
   dotnet build AutoLighterV2.sln
 ```
 
-The compiled DLL will be in `AutoLighterV2/bin/Debug/` or `AutoLighterV2/bin/Release/`.
+The compiled DLL is written to `AutoLighterV2/bin/Release/netstandard2.1/` (or `bin/Dev/Plugins/` for Debug) and, when `ChroMapperDir` is set, is automatically copied into `[ChroMapperDir]/Plugins/`. Restart ChroMapper to load the new build.
 
-### Installation
-
-Copy the compiled `AutoLighterV2.dll` to your ChroMapper plugins folder:
-`[ChroMapper]/ChroMapper_Data/Plugins/`
+VS Code: run the **Build** task (`Ctrl+Shift+B`).
 
 ## License
 
